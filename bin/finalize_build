@@ -1,0 +1,48 @@
+#!/bin/bash
+set -e
+
+gem install aws-sdk-s3
+gem install rest-client
+
+ruby -e "
+  require 'rest-client'
+  remote_url      = File.join('https://rpm-manageiq-org.nyc3.digitaloceanspaces.com/?prefix=builds', ENV['TRAVIS_REPO_SLUG'].split('/').last, ENV['TRAVIS_BUILD_NUMBER'])
+  files           = RestClient.get(remote_url).body.scan(/<Key>([^<>]*)<\/Key>/).flatten
+  src_rpm         = File.basename(files.detect { |i| i =~ /.src.rpm/ })
+  destination_dir = File.join('builds', ENV['TRAVIS_REPO_SLUG'].split('/').last.sub('rpm-', ''))
+  bucket          = 'rpm-manageiq-org'
+
+  require 'aws-sdk-s3'
+  client = Aws::S3::Client.new(
+    :access_key_id     => ENV['aws_access_key'],
+    :secret_access_key => ENV['aws_secret_key'],
+    :region            => 'us-east-1',
+    :endpoint          => 'https://nyc3.digitaloceanspaces.com'
+  )
+
+  begin
+    RestClient.head(File.join('https://rpm-manageiq-org.nyc3.digitaloceanspaces.com', destination_dir, src_rpm))
+  rescue RestClient::NotFound
+    puts 'Copying RPMs to build directory...'
+
+    files.each do |file|
+      destination = File.join(destination_dir, File.basename(file))
+      client.copy_object(
+        :acl         => 'public-read',
+        :bucket      => bucket,
+        :copy_source => File.join(bucket, file),
+        :key         => destination,
+      )
+    end
+  else
+    puts 'Build already exists!'
+  end
+
+  # Cleanup build directory
+  files.each do |file|
+    client.delete_object(
+      :bucket => bucket,
+      :key    => file
+    )
+  end
+"
