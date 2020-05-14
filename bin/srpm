@@ -26,7 +26,7 @@ ruby -e "
   spec.each_line.collect do |line|
     next unless line.start_with?('Source') || line.start_with?('Patch')
     file = line.split(' ').last
-    next if file.start_with('http')
+    next if file.start_with?('http')
     FileUtils.cp(File.join(ENV['TRAVIS_BUILD_DIR'], file), File.join(ENV['TRAVIS_BUILD_DIR'], 'SOURCES', file))
   end
 "
