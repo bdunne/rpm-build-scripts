@@ -1,7 +1,37 @@
 #!/bin/bash
 set -e
 
-docker run --rm -v $TRAVIS_BUILD_DIR:/root/working -v $TRAVIS_BUILD_DIR/result:/var/lib/mock --cap-add=SYS_ADMIN bdunne/mock bash -c "cd /root/working && fetch_sources.sh && mock -r /etc/mock/epel-8-x86_64.cfg --buildsrpm --spec ./libssh2.spec --sources=~/rpmbuild/SOURCES/"
+ruby -e "
+  spec_file = Dir.glob(File.join(ENV['TRAVIS_BUILD_DIR'], '*.spec')).first
+  spec = File.read(spec_file)
+  name = File.basename(spec_file, '.spec')
+  version = spec.each_line.detect { |l| l.start_with?('Version') }.chomp.sub(/Version:\s*/, '')
+
+  puts 'Downloading sources...'
+  require 'open-uri'
+  require 'fileutils'
+  FileUtils.mkdir_p(File.join(ENV['TRAVIS_BUILD_DIR'], 'SOURCES'))
+  sources_file = File.join(ENV['TRAVIS_BUILD_DIR'], 'sources')
+  if File.file?(sources_file)
+    File.read(sources_file).each_line do |line|
+      sha, file = line.split(' ')
+      url = File.join('https://rpm.manageiq.org/sources_cache', name, version, file)
+      File.open(File.join(ENV['TRAVIS_BUILD_DIR'], SOURCES, file), 'wb') do |source|
+        source << open(url).read
+      end
+    end
+  end
+
+  puts 'Copying local sources & patches...'
+  spec.each_line.collect do |line|
+    next unless line.start_with?('Source') || line.start_with?('Patch')
+    file = line.split(' ').last
+    next if file.start_with('http')
+    FileUtils.cp(File.join(ENV['TRAVIS_BUILD_DIR'], file), File.join(ENV['TRAVIS_BUILD_DIR'], 'SOURCES', file))
+  end
+"
+
+docker run --rm -v $TRAVIS_BUILD_DIR:/root/working -v $TRAVIS_BUILD_DIR/result:/var/lib/mock --cap-add=SYS_ADMIN bdunne/mock bash -c "cd /root/working&& mock -r /etc/mock/epel-8-x86_64.cfg --buildsrpm --spec ./*.spec --sources=/root/working/SOURCES/"
 
 gem install aws-sdk-s3
 
